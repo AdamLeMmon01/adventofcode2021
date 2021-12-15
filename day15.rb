@@ -219,4 +219,9 @@ end
 # pp "found #{total_cells} cells total when there should have been 2025"
 # pp "added #{@added_cells}"
 #
- dijkstras_algorithm(grid, grid[0][0], grid[grid.length-1][grid[0].length - 1])
+
+starting = Time.now
+dijkstras_algorithm(grid, grid[0][0], grid[grid.length-1][grid[0].length - 1])
+ending = Time.now
+elapsed = ending - starting
+pp elapsed
