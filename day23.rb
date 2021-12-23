@@ -59,10 +59,8 @@ class Amphipod
       return [] # our destinations are reached, skip us from now on.
     end
 
-    # TODO: If there's a destination abailavle, use the back, then the front if the back is already correctly filled, then break so we don't consider any other options.
-    # spaces[[@x, @y]].can_reach?(destinations[1].x, space.y, [], amphipods)
-
-
+    path_home = paths_home(spaces, amphipods)
+    return [path_home] if !path_home.nil?
 
     spaces.each do |_location, space|
       next if space.occupied?(amphipods)
@@ -97,6 +95,9 @@ class Amphipod
   def <=>(other)
     0 if other.nil?
     label == other.label && @x == other.x && @y == other.y ? 1:0
+  end
+  def ==(other)
+    label == other.label && @x == other.x && @y == other.y
   end
 end
 class A < Amphipod
@@ -249,28 +250,30 @@ end
 
 #@amphipods[0].all_possible_destinations(@spaces, @amphipods)
 def print_current_state(amphipods, spaces)
+  result = ""
   (0..4).each do |y|
     (0..12).each do |x|
       amphipod = amphipods.filter { |a| a.x == x && a.y == y }.first
       if amphipod.nil?
         if !spaces[[x,y]].nil?
-        print spaces[[x,y]].label
+          result += spaces[[x,y]].label
         else
-          print " "
+          result += " "
         end
       else
-        print amphipod.label
+        result += amphipod.label
       end
     end
-    print "\n"
+    result += "\n"
   end
-  print "\n"
+  result += "\n"
+  result
 end
 
 @tried_variations = {}
 @smallest_energy = 1000000
 @times_processed = 1
-@queue = PQueue.new { |a, b| a.sum { |a_1| a_1.energy_used } < b.sum { |b_1| b_1.energy_used } }
+@queue = PQueue.new { |a, b| a.min_cost < b.min_cost }
 
 def get_all_paths(spaces, depth = 0)
   amphipods = @queue.pop
@@ -297,6 +300,7 @@ def get_all_paths(spaces, depth = 0)
 
   @times_processed += 1
 
+  # pp "energy_used_so_far #{energy_used_so_far}"
   if @times_processed % 1000 == 0
     # pp "times processed: #{@times_processed}"
     # pp "currently available moves #{total_moves_available_from_here}"
@@ -304,9 +308,10 @@ def get_all_paths(spaces, depth = 0)
     # pp "depth #{depth}"
     # print_current_state(amphipods, spaces)
     # pp "current energy #{energy_used_so_far}"
-    pp "queue length: #{@queue.length}"
-    pp "energy_used_so_far #{energy_used_so_far}"
-
+    # pp "queue length: #{@queue.length}"
+    # pp "energy_used_so_far #{energy_used_so_far}"
+    # pp "tried variations"
+    # pp @tried_variations
   end
 
   successful_variations_so_far = 0
@@ -326,19 +331,8 @@ def get_all_paths(spaces, depth = 0)
 
   # print_current_state(amphipods, spaces)
 
-  #before just trying all possible moves, let's see if there's a priority move that can get the highest value home.
+  # amphipods.each do |amphipod|
   amphipods.sort_by{ |a| a.energy_multiplier }.reverse_each do |amphipod|
-    move = amphipod.paths_home(spaces, amphipods)
-    if !move.nil?
-      copy = amphipod.copy
-      list_copy = copy_amphipod_list(amphipods, amphipod, copy)
-      copy.move(move)
-      @queue.push(list_copy)
-    end
-  end
-
-  amphipods.each do |amphipod|
-  # amphipods.sort_by{ |a| a.energy_multiplier }.reverse_each do |amphipod|
     amphipod.all_possible_destinations(spaces, amphipods).each do |move|
       # pp "doing a move at depth #{depth}"
       # pp "#{amphipod.label} at #{amphipod.x},#{amphipod.y} having used #{amphipod.energy_used} has new possible destination: #{move}"
@@ -348,8 +342,6 @@ def get_all_paths(spaces, depth = 0)
       @queue.push(list_copy)
     end
   end
-
-  get_all_paths(spaces, depth + 1) #instead of just getting all paths, just add it to the list then have the next iteration grab the next lowest one to start with
 end
 
 def copy_amphipod_list(amphipods,to_remove, to_add)
@@ -358,9 +350,56 @@ end
 
 print_current_state(@amphipods, @spaces)
 
-@queue.push(@amphipods)
+class State
+  attr_accessor :amphipods, :energy, :depth
+
+  def initialize(amphipods, energy, depth)
+    @amphipods = amphipods
+    @energy = energy
+    @depth = depth
+  end
+
+  def possible_moves(spaces)
+    next_states = []
+
+    @amphipods.sort_by{ |a| a.energy_multiplier }.reverse_each do |amphipod|
+      amphipod.all_possible_destinations(spaces, @amphipods).each do |move|
+        copy = amphipod.copy
+        list_copy = copy_amphipod_list(@amphipods, amphipod, copy)
+        previous_energy = copy.energy_used
+        copy.move(move)
+        consumption = copy.energy_used - previous_energy
+        next_states << State.new(list_copy, @energy + consumption, depth + 1)
+      end
+    end
+    next_states
+  end
+  def finish?
+    amphipods.all? { |a| a.in_destination }
+  end
+  def min_cost
+    @min_cost ||= energy + amphipods.sum { |a| a.energy_multiplier * (a.x - a.destinations.first[0]).abs }
+  end
+end
+
+@queue.push(State.new(@amphipods, 0, 0))
+visited = {}
+last_time = Time.now
 while @queue.length > 0
-  get_all_paths(@spaces)
+  # get_all_paths(@spaces)
+  first = @queue.pop
+  break unless first
+  next if visited[first.amphipods]
+  visited[first.amphipods] = true
+  if first.finish?
+      puts first.energy
+      break
+  end
+  if Time.now > last_time + 1.0
+      p [visited.length, @queue.size, first.energy, first.min_cost]
+      last_time = Time.now
+  end
+  first.possible_moves(@spaces).each { |s| @queue.push(s) }
 end
 pp @tried_variations.count
 @tried_variations.each do |variation, energy_used|
